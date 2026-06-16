@@ -32,7 +32,7 @@ Otto runs as a background service, communicating with the frontend interface via
 
 ## 🛣️ Roadmap
 
-- [ ] Establish local-only background daemon structure.
+- [x] Establish local-only background daemon structure.
 - [ ] Implement local WebSocket server for zero-network-lag messaging.
 - [ ] Connect a 1B–3B parameter quantized open-source LLM for predictive testing.
 - [ ] Standardize the communication JSON schema between Otto and the AAC frontend interface.
