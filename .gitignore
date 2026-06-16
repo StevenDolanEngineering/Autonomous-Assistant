@@ -6,6 +6,7 @@ venv/
 __pycach__/
 *.__pycach__
 *.pyc
+.DS_Store
 
 # Environment files
 .env
