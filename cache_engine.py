@@ -19,7 +19,7 @@ class AACPhraseCache:
     
     def add_phrase(self, phrase: str, category: str):
         """Adds a standard phrase to the high-speed local cache."""
-        embedding = self.__get_embedding(phrase)
+        embedding = self._get_embedding(phrase)
         vector  = np.array([embedding]).astype('float32')
 
         # Add to FAISS index
@@ -35,7 +35,7 @@ class AACPhraseCache:
             return None
         
         context_embedding = self._get_embedding(user_context)
-        query_vector = np.arrary([context_embedding]).astype('float32')
+        query_vector = np.array([context_embedding]).astype('float32')
 
         # Search the 1 nearest neighbor
         distances, indices = self.index.search(query_vector, 1)
