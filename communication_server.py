@@ -4,6 +4,10 @@ import dataclasses
 from typing import Dict, Any
 import websockets
 
+# Import local optimization and prediction layers
+from assistant_engine import process_aac_intent, fallback_system
+
+# Priority tiers for the AAC device
 PRIORITY_URGENT = 0  # User vocalizations, physical button actions
 PRIORITY_ROUTINE = 1 # UI updates, prediction suggestions
 PRIORITY_BACKGROUND = 2 # Sensor polling, telemetry dumps
@@ -11,16 +15,16 @@ PRIORITY_BACKGROUND = 2 # Sensor polling, telemetry dumps
 @dataclasses.dataclass(order=True)
 class OutboundMessage:
     priority: int
-    payloud: Dict[str, Any] = dataclasses.field(compare=False)
+    payload: Dict[str, Any] = dataclasses.field(compare=False)
 
 class OttoNetworkEngine:
-    def __int__(self, host: str = "127.0.0.1", port: int = 8765):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8765):
         self.host = host
         self.port = port
         # Centralized async multi-producer, multi-consumer priority queue
         self.outbound_queue = asyncio.PriorityQueue()
         # Track connected frontend clients
-        self.connected_client = set()
+        self.connected_clients = set()
         # Keep track of active background loops so we can cancel/interrupt them
         self.background_tasks = []
     
@@ -42,7 +46,7 @@ class OttoNetworkEngine:
                 wrapped_msg = await self.outbound_queue.get()
                 message_str = json.dumps(wrapped_msg.payload)
 
-                if self.connected_Clients:
+                if self.connected_clients:
                     # Broadcast to all open frontends simultaneously
                     await asyncio.gather(
                         *[client.send(message_str) for client in self.connected_clients],
@@ -53,24 +57,45 @@ class OttoNetworkEngine:
                 break
     
     async def handle_incoming(self, websocket):
-        """Processes incoming data packages sent from the user frontend."""
+        """Handles incoming character/word typing events from the user interface."""
+        async_loop = asyncio.get_running_loop()
+
         async for message in websocket:
             try:
                 data = json.loads(message)
                 event_type = data.get("event")
 
-                if event_type == "USER_INPUT":
-                    print("Urgent user interface interaction caught!")
-                    # interrupt non-essential tasks immediately if needed
-                    await self.queue_message(PRIORITY_URGENT, {
-                        "status": "processing_intent",
-                        "text": data.get("text")
+                # Triggers whenever user types or modifies characters/words
+                if event_type == "LIVE_TYPING_UPDATE":
+                    current_text = data.get("text", "").strip()
+                    if not current_text:
+                        continue
+
+                    print(f"Keystroke event caught: '{current_text}'")
+
+                    # RUN LOCAL INTELLIGENCE IN A SEPARATE THREAD
+                    # This stops the LLM generation loop from blocking network activity
+                    prediction_result = await async_loop.run_in_executor(
+                        None, process_aac_intent, current_text
+                    )
+
+                    # Package and inject prediction payloads to the routine priority loop
+                    await self.queue_message(PRIORITY_ROUTINE, {
+                        "event": "PREDICTION_UPDATE",
+                        "data": prediction_result
                     })
 
+                # Triggers when a user confirms their final phrase statement
+                elif event_type == "PHRASE_COMPLETED":
+                    completed_text = data.get("text", "").strip()
+                    if completed_text:
+                        # Feed back into adaptive learning corpus matric
+                        fallback_system.learn_completed_phrase(completed_text)
+
             except json.JSONDecodeError:
-                print("Received unparaseable message formatting.")
+                print("Received unparaseable JSON stream payload.")
         
-    async def queue_message(self, priorty: int, payload: dict):
+    async def queue_message(self, priority: int, payload: dict):
         """Exposes safe mechanism to drop packets into the priority queue."""
         await self.outbound_queue.put(OutboundMessage(priority=priority, payload=payload))
     
@@ -94,7 +119,7 @@ class OttoNetworkEngine:
     async def main_server_loop(self):
         """Initializes server pipelines concurrently."""
         # Spin up the dispatch worker
-        sender_task = asyncio.create_create_task(self.send_worker())
+        sender_task = asyncio.create_task(self.send_worker())
         # Spin up the sensor tracking thread
         sensor_task = asyncio.create_task(self.environment_polling_loop())
 
@@ -107,12 +132,12 @@ class OttoNetworkEngine:
             finally:
                 await self.unregister_client(websocket)
             
-        print(f"Otto low-latency daemon running on ws://{self.host:{self.port}}")
+        print(f"Otto live network layer running on ws://{self.host}:{self.port}")
         async with websockets.serve(handler, self.host, self.port):
             # Run forever
             await asyncio.Future()
 if __name__ == "__main__":
-    sever = OttoNetworkEngine()
+    server = OttoNetworkEngine()
     try:
         asyncio.run(server.main_server_loop())
     except KeyboardInterrupt:
