@@ -16,7 +16,7 @@ STATIC_PHRASEBOOK: Dict[str, str] = {
 }
 
 class DeterministicFallbackEngine:
-    def __int__(self):
+    def __init__(self):
         # Local state to hold simple predictive word pairings
         # Maps a single word to possible next words and their frequencies
         self.prediction_graph: Dict[str, Dict[str, int]] = {
@@ -66,7 +66,7 @@ class DeterministicFallbackEngine:
             self.prediction_graph[current_word][next_word] = self.prediction_graph[current_word].get(next_word, 0) + 1
 
         self.saved_learned_corpus()
-        
+
     def match_static_keywords(self, partial_text: str) -> str:
         """Scans the text input for immediate critical keywords."""
         words = partial_text.lower().split()

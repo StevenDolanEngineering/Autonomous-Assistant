@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Otto AAC Dashboard</title>
+        <style>
+            body {
+                font-family: system-ui, -apple-system, sans-serif;
+                background-color: #f4f5f7;
+                padding: 40px;
+                max-width: 600px;
+                margin: 0 auto;
+            }
+            .card {
+                background: white;
+                padding: 30px;
+                border-radius: 12px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            }
+            h2 { margin-top: 0; color: #1e293b; }
+            .status {
+                font-size: 14px;
+                padding: 6px 12px;
+                border-radius: 20px;
+                display: inline-block;
+                margin-bottom: 20px;
+                font-weight: bold;
+            }
+            .connected { background-color: #d1fae5; color: #065f46; }
+            .disconnected { background-color: #fee2e2; color: #991b1b; }
+            textarea {
+                width: 100%;
+                height: 100px;
+                padding: 12px;
+                border: 2px solid #cbd5e1;
+                border-radius: 8px;
+                box-sizing: border-box;
+                font-size: 16px;
+                resize: none;
+            }
+            textarea:focus { border-color: #3b82f6; outline: none; }
+            .prediction-box {
+                margin-top: 20px;
+                padding: 15px;
+                background: #f8fafc;
+                border-left: 4px solid #3b82f6;
+                border-radius: 4px;
+            }
+            .phrase { font-size: 18px; font-weight: bold; color: #1e293b; margin: 5px 0; }
+            .metadata { font-size: 12px; color: #64748b; }
+            .btn {
+                margin-top: 15px;
+                background: #10b981;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            .btn:hover { background: #059669; }
+        </style>
+    </head>
+    <body>
+    
+    <div class="card">
+        <h2> Otto AAC Frontend</h2>
+        <div id="statusIndicator" class="status disconnected">Connecting to Daemon...</div>
+
+        <label for="typingArea" style="display:block; margin-bottom:8px; color:#475569;">Type here:</label>
+        <textarea id="typingArea" placeholder="Start typing context..."></textarea>
+
+        <button class="btn" id="completeBtn">Complete & Learn Phrase</button>
+
+        <div class="prediction-box">
+            <div style="color: #64748b; font-size: 12px; font-weight: bold; text-transform: uppercase;">Predicted Phrase Output</div>
+            <div class="phrase" id="predictedPhrase">...</div>
+            <div class="metadata" id="predictionMeta">Source: None | Confidence: 0.00</div>
+        </div>
+    </div>
+
+    <script>
+        // Establish WebSocket Connection to your Python backend
+        const socket = new WebSocket('ws://127.0.0.1:8765');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const typingArea = document.getElementById('typingArea');
+        const predictedPhrase = document.getElementById('predictedPhrase');
+        const predictionMeta = document.getElementById('predictionMeta');
+        const completeBtn = document.getElementById('completeBtn');
+        let typingTimeout = null;
+        let lastSentText = "";
+
+        socket.onopen = () => {
+            statusIndicator.textContent = "System Online";
+            statusIndicator.className = "status connected";
+        }
+
+        socket.onclose = () => {
+            statusIndicator.textContent = "System Offline";
+            statusIndicator.className = "status disconnected";
+        };
+
+        // Listen for live prediction payloads sent back by Python
+        socket.onmessage = (event) => {
+            const payload = JSON.parse(event.data);
+
+            //Skip background heartbeat logs in the UI view
+            if (payload.event === "PREDICTION_UPDATE") {
+                const engineData = payload.data;
+                predictedPhrase.textContent = engineData.predicted_phrase;
+                predictionMeta.textContent = `Source: ${engineData.source} | Confidence: ${engineData.confidence_score.toFixed(2)}`;
+            }
+        };
+
+        // Track input updates word-by-word/character-by-character
+        typingArea.addEventListener('input', (e) => {
+            const textValue = e.target.value;
+            const trimmedText = textValue.trim();
+
+            if (!trimmedText || socket.readyState !== WebSocket.OPEN) return;
+
+            //If user just pressed Space, trigger an immediate word update
+            if (textValue.endsWith(" ")) {
+                if (trimmedText !== lastSentText) {
+                    socket.send(JSON.stringify({
+                        event: "LIVE_TYPING_UPDATE",
+                        text: trimmedText
+                    }));
+                    lastSentText = trimmedText;
+                }
+                return
+            }
+
+            // If user is mid-word, clear the old timer and wait 800ms
+            // Prevents flooding server while user is typing letter by letter
+            clearTimeout(typingTimeout);
+            typingTimeout = setTimeout(() => {
+                if (trimmedText !== lastSentText) {
+                    socket.send(JSON.stringify({
+                        event: "LIVE_TYPING_UPDATE",
+                        text: trimmedText
+                    }));
+                    lastSentText = trimmedText;
+                }
+            }, 800); // 800ms pause threshold
+        });
+
+        // Handle string sentence completion and teach the adaptive model matrix
+        completeBtn.addEventListener('click', () => {
+            const finalPhrase = typingArea.value.trim();
+            if (finalPhrase && socket.readyState === WebSocket.OPEN) {
+                // Clear any pending character timeouts immediately
+                clearTimeout(typingTimeout);
+
+                socket.send(JSON.stringify({
+                    event: "PHRASE_COMPLETED",
+                    text: finalPhrase
+                }));
+
+                // Clear input for next text string
+                typingArea.value = '';
+                lastSentText = "";
+                predictedPhrase.textContent = '...';
+                predictionMeta.textContent = 'Source: Learned | Confidence: 1.00';
+
+                alert(`Otto learned: "${finalPhrase}"`);
+            }
+        });
+
+        function json() { return { stringify: JSON.stringify }; } // Helper utility context wrapper
+    </script>
+    </body>
+</html>
